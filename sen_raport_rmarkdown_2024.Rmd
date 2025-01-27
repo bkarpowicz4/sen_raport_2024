@@ -1,0 +1,222 @@
+---
+title: "Raportu snu - 2024"
+author: "Bartosz Karpowicz"
+date: '`r Sys.Date()`'
+output: html_document
+---
+Sylwester już dawno za mną i nie ukrywam, że z ciekawością oczekuję na to, co przyniesie mi rok 2025.
+Mimo wszystko warto podsumować poprzednie 12 miesięcy i odpowiedzieć na ważne pytanie:
+***Jak dobrze mi się spało w 2024 roku?***
+
+### Metodologia
+Przyzwyczaiłem sie do noszenia swojego smartwach'a, a co za tym idzie, już od dłuższego czasu staram się mieć go na sobie na czas snu. Niespodziewanie z mojego nawyku powstał obszerny zbiór danych, który zaciekawił mnie na tyle, że postanowiłem przyjrzeć mu się bliżej i przeanalizować zgromadzone dane. Nazwa zegarka to **HUAWEI WATCH GT 2e-97C**.
+Dane pozyskane zostały z aplikacji Huawei Zdrowie.
+
+### Czyszczenie i transformacja danych
+Na początek wczytamy paczki potrzebne do wykonywania operacji na danych oraz wizualizacji.
+
+```{r ładowanie paczek, include=T, message=F}
+#Do zainstalowania paczek służy funkcja install.packages("nazwa_paczki")
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+```
+Teraz wczytamy dane z pliku csv, który dostępny jest do pobrania w odpowiednim [repozytorium](https://github.com/bkarpowicz4/sen_raport_2024) na moim GitHubie. Następnie niektóre zmienne zostaną przekształcone na kategoryczne.
+```{r ładowanie i czyszczenie danych}
+dane <- read.csv("C:/Users/Bartosz/OneDrive - SGH/Pulpit/R projekty/sen_raport_2024/sen 2024 - kompletne dane.csv")
+
+#Formatowanie zmiennych
+dane$Dzień.tygodnia <- as.factor(dane$Dzień.tygodnia)
+dane$Dzień.miesiąca <- as.factor(dane$Dzień.miesiąca)
+dane$Miesiąc <- as.factor(dane$Miesiąc)
+dane$Tydzień <- as.factor(dane$Tydzień)
+dane$czy.zasnąłem.po.północy. <- as.factor(dane$czy.zasnąłem.po.północy.)
+dane$Data <- ymd(dane$Data)
+
+#Tworzenie zmiennej kategorycznej opisującej porę wstania oraz zaśnięcia
+dane <- dane %>% 
+  mutate(sleepcat=as.factor(Godzina.zaśnięcia),
+         awakecat=as.factor(Godzina.wybudzenia))
+levels(dane$awakecat) <- c("3.00-4.00","4.00-5.00","5.00-6.00","6.00-7.00","7.00-8.00","8.00-9.00","9.00-10.00","10.00-11.00","11.00-12.00")
+levels(dane$sleepcat) <- c("0.00-1.00","1.00-2.00","2.00-3.00","3.00-4.00","4.00-5.00","6.00-7.00","20.00-21.00","21.00-22.00","22.00-23.00","23.00-0.00")
+```
+
+### Wyniki i wizualizacje
+
+```{r braki danych, echo=F}
+#Ile dni bez pomiaru (NA)
+dni_bez_pomiaru <- length(which(is.na(dane$Różnica)))
+dbp_pr <- (1 - round(dni_bez_pomiaru/366, 2))*100
+```
+
+Nie zebrano pomiarów dla `r dni_bez_pomiaru` dni: oznacza to, że około **`r dbp_pr`%** wszystkich nocy w 2024 miałem zegarek na ręce podczas snu. Przyjrzyjmy się teraz podstawowym statystykom opisowym wybranych zmiennych:
+
+```{r message=T, echo=FALSE}
+#Statystyki opisowe snu dla wszystkich miesięcy
+dane <- dane %>% na.omit()
+dane %>%
+  group_by(Miesiąc) %>% 
+  summarise(avg_sleep_time=mean(DS.ogółem..łącznie.w.min., na.rm = T),
+            avg_time_in_bed=mean(Różnica..minuty. , na.rm = T),
+            avg_wakeup=mean(Liczba.wybudzeń, na.rm = T),
+            avg_diff=mean(minuty.w.łóżku.gdy.nie.spałem, na.rm = T))
+
+#srednia dlugosc snu w min i h, maks i min sen w godzinach
+sr_dl_min <- round(mean(dane$DS.ogółem..łącznie.w.min.),0)
+sr_dl_h <- round(sr_dl_min/60, 2)
+min_dl <- min(dane$Długość.snu.ogółem..podstawa...drzemki.)
+min_dl_date <- dane$Data[which(dane$Długość.snu.ogółem..podstawa...drzemki.==min(dane$Długość.snu.ogółem..podstawa...drzemki.))]
+max_dl <- max(dane$Długość.snu.ogółem..podstawa...drzemki.)
+max_dl_date <- dane$Data[which(dane$Długość.snu.ogółem..podstawa...drzemki.==max(dane$Długość.snu.ogółem..podstawa...drzemki.))]
+```
+
+Średnia długość snu w 2024 była równa **`r sr_dl_min`** minut, co daje około **`r sr_dl_h`** godziny. Najkrótszy sen trwał **`r min_dl`** i miał on miejsce `r min_dl_date`, a najdłuższy **`r max_dl`** i wystąpił on w dniu `r max_dl_date` (daty zapisane w systemie amerykańskim).
+
+Takie suche liczby na pierwszy rzut oka niewiele nam mówią. Zatem lepiej zaprezentować to, co mają do przekazania za pomocą wykresów. Spójrzmy zatem na wykres, który przedstawia jak często chodziłem spać w danym przedziale czasu:
+
+```{r echo=FALSE, message=FALSE}
+#Czestotliwosc zasypiania miedzy danymi godzinami
+
+#levels(dane$sleepcat)
+#Etykiety nie są posortowane w logiczny sposób, zmieniam więc ich pozycję
+dane$sleepcat <- factor(dane$sleepcat, levels = c("20.00-21.00", "21.00-22.00", "22.00-23.00", "23.00-0.00", "0.00-1.00", "1.00-2.00", "2.00-3.00", "3.00-4.00", "4.00-5.00", "6.00-7.00"))
+ggplot(dane, aes(x = sleepcat)) +
+  geom_histogram(stat="count", fill="#00838f") +
+  theme_minimal() +
+  labs(x = "przedział godzin", y = "częstość") +
+  theme(
+    axis.text.x = element_text(size = 7),
+    axis.text.y = element_text(size = 7))
+```
+
+Najczęściej zasypiałem między godziną **23.00 a 0.00**. A jak prezentuje się taki sam wykres, lecz odnoszący się do wstawania w danym przedziale czasowym?
+
+```{r echo=FALSE}
+#Czestotliwosc budzenia się miedzy danymi godzinami
+ggplot(dane, aes(x = awakecat)) +
+  geom_histogram(stat="count", fill="#00838f") +
+  theme_minimal() +
+  labs(x = "przedział godzin", y = "częstość") +
+  theme(
+    axis.text.x = element_text(size = 7),
+    axis.text.y = element_text(size = 7))
+```
+
+Najczęściej wstawałem między godziną **7.00 i 8.00**. Przez zdecydowaną większość roku wstawałem między godziną **6.00 i 9.00**.
+
+Zobaczmy teraz ogólny wykres przespanych minut na przestrzeni roku oraz linię trendu.
+
+```{r echo=FALSE}
+#Ogólny wykres przespanych minut na przestrzeni roku z linią trendu (nie lm)
+ggplot(dane, aes(y = Różnica..minuty., x = Data)) +
+  geom_line() +
+  geom_smooth(se = F) +
+  theme_minimal() +
+  labs(x = "", y = "dzienna liczba przespanych minut")
+```
+
+Doskonale widać, że w okresie między późną wiosną a wczesnym latem spałem zdecydowanie najkrójcej w całym roku. Trend przespanych minut wraca do poziomu z początku roku dopiero w okolicach września i do końca roku utrzymuje się na tym samym, równym poziomie.
+
+Porównajmy trendy przespanych minut dla każdego z miesięcy.
+
+```{r echo=F, message=FALSE}
+#Ogólny wykres snu w ciągu roku z podziałem na poszczególne miesiące oraz ich linie trendu
+levels(dane$Miesiąc) <- c("styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień")
+dane %>% 
+  ggplot(., aes(y = DS.ogółem..łącznie.w.min., x = Data, color = Miesiąc)) +
+  geom_line() +
+  geom_smooth(method = "lm", se = F) +
+  theme_minimal() +
+  labs(x = "", y = "dzienna liczba przespanych minut")
+```
+
+Njabradziej stabilnym miesiącem pod względem linii trendu był listopad. Największy spadek trendu na przestrzeni miesiąca wystąpił we wrześniu, a największy wzrost w grudniu.
+
+```{r echo=FALSE}
+#Ile razy zasnąłem przed północą?
+levels(dane$czy.zasnąłem.po.północy.) <- c("przed północą", "po północy")
+
+after_midnight <- dane %>% 
+  group_by(czy.zasnąłem.po.północy.) %>% 
+  summarise(liczba = n())
+
+ggplot(after_midnight, aes(x = "", y = liczba, fill = czy.zasnąłem.po.północy.)) +
+  geom_bar(stat = "identity", width = 1) +        # Wykres warstwowy
+  coord_polar("y", start = 0) +                   # Przekształcenie na wykres kołowy
+  geom_text(aes(label = liczba), 
+            position = position_stack(vjust = 0.5), color = "black") + # Dodanie etykiet
+  labs(fill = "Pora zaśnięcia") +
+  theme_void()
+```
+
+Powyższy wykres informuje, że w 2024 roku częściej zdarzało mi się zasypiać przed północą.
+
+``` {r echo=F}
+#średnia przespanych minut dla każdego miesiąca
+ss <- dane %>% 
+  group_by(Miesiąc) %>% 
+  summarise(avg_sleep_time=mean(DS.ogółem..łącznie.w.min., na.rm = T))
+
+ggplot(ss, aes(x = Miesiąc, y = avg_sleep_time)) +
+  geom_bar(stat="identity", fill="#00838f") +
+  theme_minimal() +
+  labs(x = "miesiąc", y = "średnia liczba przespanych minut") +
+  theme(
+    axis.text.x = element_text(size = 7.7),
+    axis.text.y = element_text(size = 7.7))
+```
+
+Najlepsze 3 miesiące pod względem średniej liczby przespanych minut to **luty, sierpień oraz grudzień**, natomiast najgorsze 3 miesiące to **maj, czerwiec i październik**.
+
+``` {r include=F}
+#Liczba przespanych minut w lutym
+dane_lis <- dane %>% filter(Miesiąc==2)
+ggplot(dane_lis, aes(y = DS.ogółem..łącznie.w.min., x = Data)) +
+  geom_line() +
+  theme_minimal() +
+  labs(x = "dzień miesiąca", y = "dzienna liczba przespanych minut")
+```
+
+``` {r echo=F}
+#Średnia liczba minut snu dla każdego z dni w tygodniu
+
+dane$Dzień.tygodnia <- factor(dane$Dzień.tygodnia, levels = c("2", "3", "4", "5", "6", "7", "1"))
+levels(dane$Dzień.tygodnia) <- c("poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela")
+
+#Czy istnieją różnice w długości snu między dniami roboczymi a weekendami?
+avg_weekday <- dane %>% group_by(Dzień.tygodnia) %>% 
+  #filter(Dzień.tygodnia==1) %>%  #niedziela ma kod 1, sobota ma kod 7
+  summarise(avg_sleep_time=mean(DS.ogółem..łącznie.w.min., na.rm = T))
+
+ggplot(avg_weekday, aes(x = Dzień.tygodnia, y = avg_sleep_time)) +
+  geom_bar(stat="identity", fill="#00838f") +
+  theme_minimal()+
+  labs(x = "dzień tygodnia", y = "średnia liczba przespanych minut")
+```
+
+Z powyższego wykresu wynika, że największa średnia przespanych minut w 2024 roku przypadła na niedzielę. Najlepszym wytłumaczeniem takiego stanu rzeczy jest prawdpopodobnie to, że w ten dzień nadrabiałem niedobór snu "wypracowany" w poprzednich dniach tygodnia (albo był to jeden ze sposobów na nudę).
+
+``` {r echo=F}
+#Scatter plot - przebudzenia a liczba przespanych minut
+dane %>% 
+  group_by(Miesiąc) %>% 
+  summarise(avg_wu = mean(Liczba.wybudzeń),
+            avg_sleep_time = mean(DS.ogółem..łącznie.w.min.)) %>% 
+  ggplot(., (aes(x = avg_wu, y = avg_sleep_time))) +
+  geom_point() +
+  geom_text(
+    mapping = aes(label = Miesiąc),
+    nudge_x = -0.15,
+    nudge_y = 2.5,
+    size = 3.2) +
+  geom_vline(xintercept = 4.236842, color = "#00838f", linetype = "dotted", size = 1) +
+  geom_hline(yintercept = 422.0117, color = "#00838f", linetype = "dotted", size = 1) +
+  annotate("text", x = 3.1, y = 360, label = "Krótki sen, mało wybudzeń", color = "#00838f", size = 3) +
+  annotate("text", x = 3.1, y = 480, label = "Długi sen, mało wybudzeń", color = "#00838f", size = 3) + 
+  annotate("text", x = 6, y = 360, label = "Krótki sen, dużo wybudzeń", color = "#00838f", size = 3) +
+  annotate("text", x = 6, y = 480, label = "Długi sen, dużo wybudzeń", color = "#00838f", size = 3) +
+  labs(x = "średnia liczba przebudzeń w miesiącu", y = "średnia liczba przespanych minut w miesiącu") +
+  theme_minimal()
+```
+
+***Po więcej ciekawych projektów, zajrzyj na <https://github.com/bkarpowicz4>.***
